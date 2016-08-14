@@ -6,11 +6,21 @@ import (
 	"time"
 )
 
+var (
+	globalInode = uint64(0)
+)
+
+func nextInode() uint64 {
+	globalInode++
+	return globalInode
+}
+
 // Node represents a node in Firebase.
 type Node struct {
 	Created time.Time
 	Updated time.Time
 	Data    interface{}
+	Inode   uint64 // guaranteed unique inode
 }
 
 // NodeMap is used as Data within Node when it is a map.
@@ -19,6 +29,14 @@ type NodeMap map[string]*Node
 // Print renders data rooted at this Node.
 func (n *Node) Print() {
 	n.internalPrint("")
+}
+
+// Map returns the NodeMap for this Node, or nil if it is not an object/dir.
+func (n *Node) Map() NodeMap {
+	if m, ok := n.Data.(NodeMap); ok {
+		return m
+	}
+	return nil
 }
 
 // Handle sets the given path to the specified raw data.
@@ -52,7 +70,7 @@ func (n *Node) internalHandle(now time.Time, p []string, data interface{}) bool 
 		if data == nil {
 			return false // don't bother proceeding, nuking anyway
 		}
-		child = &Node{Created: now}
+		child = &Node{Created: now, Inode: nextInode()}
 		m[key] = child
 	}
 	nuked := child.internalHandle(now, p[1:], data)
@@ -88,7 +106,7 @@ func (n *Node) set(now time.Time, data interface{}) bool {
 		n.Data = local
 
 		for k, sub := range m {
-			node := &Node{Created: now}
+			node := &Node{Created: now, Inode: nextInode()}
 			if !node.set(now, sub) {
 				local[k] = node
 			}
