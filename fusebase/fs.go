@@ -11,11 +11,12 @@ import (
 )
 
 func (f *FUSEBase) Root() (fs.Node, error) {
-	return &fsNode{&f.root}, nil
+	return &fsNode{Node: &f.root}, nil
 }
 
 type fsNode struct {
 	Node *local.Node
+	b    []byte // cache
 }
 
 func (node *fsNode) Attr(ctx context.Context, a *fuse.Attr) error {
@@ -23,8 +24,9 @@ func (node *fsNode) Attr(ctx context.Context, a *fuse.Attr) error {
 	if node.Node.Map() != nil {
 		a.Mode = os.ModeDir | 0555
 	} else {
+		node.b = node.Node.Bytes()
+		a.Size = uint64(len(node.b))
 		a.Mode = 0644
-		a.Size = 0 // uint64(len(greeting)) // TODO
 	}
 	return nil
 }
@@ -40,7 +42,7 @@ func (node *fsNode) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	if sub == nil {
 		return nil, fuse.ENOENT
 	}
-	return &fsNode{sub}, nil
+	return &fsNode{Node: sub}, nil
 }
 
 func (node *fsNode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
@@ -64,5 +66,8 @@ func (node *fsNode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 }
 
 func (node *fsNode) ReadAll(ctx context.Context) ([]byte, error) {
-	return []byte{}, nil
+	if node.b == nil {
+		node.b = node.Node.Bytes()
+	}
+	return node.b, nil
 }

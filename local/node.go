@@ -2,6 +2,7 @@ package local
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -25,6 +26,19 @@ type Node struct {
 
 // NodeMap is used as Data within Node when it is a map.
 type NodeMap map[string]*Node
+
+// Bytes returns this Node as bytes, for primitive nodes.
+func (n *Node) Bytes() []byte {
+	switch d := n.Data.(type) {
+	case int64:
+		return strconv.AppendInt(nil, d, 10)
+	case float64:
+		return strconv.AppendFloat(nil, d, 'f', -1, 64)
+	case string:
+		return []byte(d)
+	}
+	return nil
+}
 
 // Print renders data rooted at this Node.
 func (n *Node) Print() {
