@@ -13,6 +13,9 @@ import (
 	"golang.org/x/net/context"
 )
 
+// TODO: None of this is threadsafe. Updates come in on their own goroutine,
+// and it's unclear where bazil.org/fuse library calls these handlers from.
+
 func (f *FUSEBase) Root() (fs.Node, error) {
 	return &fsNode{Node: &f.root, f: f}, nil
 }
@@ -84,33 +87,39 @@ func (node *fsNode) Write(ctx context.Context, req *fuse.WriteRequest, resp *fus
 		return fuse.EIO
 	}
 
-	value := bytesToValue(req.Data)
+	value := bytesToValue(req.Data, node.Node.Data)
 
 	// TODO: This is a synchronous write that doesn't update the local state. We probably want to
-	// optimistically set locally and send the request later (support offline). But Firebase has no
-	// versioning so we have no idea when our change comes back.
-	log.Printf("got set for: %v => %v\n", node.Node.Key, value)
+	// optimistically set locally and send the request later (support offline), then wait until the
+	// update comes in (during the write, or immediately after it).
+	log.Printf("set: %v => %v\n", node.Node.Key, value)
 	fb := node.f.f
 	if node.Node.Key != "" {
 		fb = fb.Child(node.Node.Key)
 	}
 	err := fb.Set(value) // set, because this is a file node
 	if err != nil {
-		log.Printf("couldn't write, got err: %v", err)
 		return err
 	}
-	log.Printf("write ok");
 
 	resp.Size = len(req.Data)
 	return nil
 }
 
-func bytesToValue(b []byte) interface{} {
-	// TODO: js true/false?
+// bytesToValue converts the written bytes to a native type to write to Firebase, incorporating
+// the node's previous value (if any).
+func bytesToValue(b []byte, prev interface{}) interface{} {
+	if _, ok := prev.(string); ok {
+		return string(b) // previously a string, assume string
+	}
+
 	s := string(b)
 	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64) // need to TrimSpace for newline
-	if err == nil {
-		return f
+	if err != nil {
+		return s // string (nb. echo generates newlines, most people don't want them)
 	}
-	return s // nb. echo generates newlines, most people don't want them
+	if _, ok := prev.(bool); ok {
+		return f != 0 // prev was bool, assume number means bool again
+	}
+	return f // number
 }

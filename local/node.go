@@ -36,6 +36,12 @@ func (n *Node) Bytes() []byte {
 		return strconv.AppendInt(nil, d, 10)
 	case float64:
 		return strconv.AppendFloat(nil, d, 'f', -1, 64)
+	case bool:
+		// TODO: what's better than 1/0?
+		if d {
+			return []byte("1")
+		}
+		return []byte("0")
 	case string:
 		return []byte(d)
 	}
