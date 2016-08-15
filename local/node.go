@@ -20,8 +20,10 @@ func nextInode() uint64 {
 type Node struct {
 	Created time.Time
 	Updated time.Time
-	Data    interface{}
 	Inode   uint64 // guaranteed unique inode
+	Key     string
+
+	Data interface{}
 }
 
 // NodeMap is used as Data within Node when it is a map.
@@ -84,7 +86,7 @@ func (n *Node) internalHandle(now time.Time, p []string, data interface{}) bool 
 		if data == nil {
 			return false // don't bother proceeding, nuking anyway
 		}
-		child = &Node{Created: now, Inode: nextInode()}
+		child = &Node{Created: now, Inode: nextInode(), Key: n.Key + "/" + key}
 		m[key] = child
 	}
 	nuked := child.internalHandle(now, p[1:], data)
@@ -119,10 +121,10 @@ func (n *Node) set(now time.Time, data interface{}) bool {
 		local := make(NodeMap)
 		n.Data = local
 
-		for k, sub := range m {
-			node := &Node{Created: now, Inode: nextInode()}
+		for key, sub := range m {
+			node := &Node{Created: now, Inode: nextInode(), Key: n.Key + "/" + key}
 			if !node.set(now, sub) {
-				local[k] = node
+				local[key] = node
 			}
 		}
 		return len(local) == 0 // nuke if we didn't end up with any keys for some reason

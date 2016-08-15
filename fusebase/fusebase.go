@@ -26,6 +26,7 @@ func New(firebase, key string) (*FUSEBase, error) {
 		return nil, err
 	}
 
+	// root has empty key, not "/"
 	fb.root.Created = time.Now()
 
 	go func() {
@@ -39,6 +40,7 @@ func New(firebase, key string) (*FUSEBase, error) {
 				if err != nil {
 					log.Fatalf("couldn't handle update: %v", err)
 				}
+				log.Printf("update ok for: %v", event.Path)
 			case "event_error":
 				log.Printf("got firebase error: %+v", event.Data)
 			default:
