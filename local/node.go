@@ -76,6 +76,7 @@ func (n *Node) Handle(now time.Time, path string, data interface{}) error {
 
 func (n *Node) internalHandle(now time.Time, p []string, data interface{}) bool {
 	if len(p) == 0 {
+		// TODO: directories can become files and vice versa
 		return n.set(now, data)
 	}
 

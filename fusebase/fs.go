@@ -93,7 +93,7 @@ func (node *fsNode) Create(ctx context.Context, req *fuse.CreateRequest, resp *f
 	}
 
 	// TODO: this doesn't push to Firebase until something gets written to it
-	err := node.Node.Handle(time.Now(), "/" + req.Name, "")
+	err := node.Node.Handle(time.Now(), "/"+req.Name, "")
 	if err != nil {
 		log.Printf("couldn't create new path (path=%v): %v", req.Name, err)
 		return nil, nil, fuse.EIO
@@ -101,6 +101,19 @@ func (node *fsNode) Create(ctx context.Context, req *fuse.CreateRequest, resp *f
 
 	n, err := node.Lookup(ctx, req.Name)
 	return n, n, err
+}
+
+func (node *fsNode) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
+	// TODO: same sync write as below
+	key := node.Node.Key + "/" + req.Name
+	log.Printf("remove: %v", key)
+	fb := node.f.fbFor(key)
+	if fb == nil {
+		return fuse.EIO
+	}
+
+	// this works for directories too, so rmdir a directory removes all its children
+	return fb.Set(nil)
 }
 
 func (node *fsNode) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
@@ -123,15 +136,14 @@ func (node *fsNode) Write(ctx context.Context, req *fuse.WriteRequest, resp *fus
 	// optimistically set locally and send the request later (support offline), then wait until the
 	// update comes in (during the write, or immediately after it).
 	log.Printf("set: %v => %v", node.Node.Key, value)
-	fb := node.f.f
-	if node.Node.Key != "" {
-		fb = fb.Child(node.Node.Key)
+	fb := node.f.fbFor(node.Node.Key)
+	if fb == nil {
+		return fuse.EIO
 	}
 	err := fb.Set(value) // set, because this is a file node
 	if err != nil {
 		return err
 	}
-
 	resp.Size = len(req.Data)
 	return nil
 }

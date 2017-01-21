@@ -53,3 +53,11 @@ func New(firebase, key string) (*FUSEBase, error) {
 
 	return fb, nil
 }
+
+func (f *FUSEBase) fbFor(key string) *firego.Firebase {
+	fb := f.f
+	if key != "" {
+		fb = fb.Child(key)
+	}
+	return fb
+}
