@@ -8,7 +8,7 @@ import (
 // bytesToValue converts the written bytes to a native type to write to Firebase, incorporating
 // the node's previous value (if any).
 func bytesToValue(b []byte, prev interface{}) interface{} {
-	if _, ok := prev.(string); ok {
+	if v, ok := prev.(string); ok && v != "" {
 		return string(b) // previously a string, assume string
 	}
 

@@ -7,6 +7,7 @@ import (
 
 	"log"
 	"os"
+	"time"
 
 	"golang.org/x/net/context"
 )
@@ -24,9 +25,13 @@ type fsNode struct {
 	b    []byte // cache
 }
 
+func (node *fsNode) isDir() bool {
+	return node.Node.Map() != nil
+}
+
 func (node *fsNode) Attr(ctx context.Context, a *fuse.Attr) error {
 	a.Inode = node.Node.Inode
-	if node.Node.Map() != nil {
+	if node.isDir() {
 		a.Mode = os.ModeDir | 0555
 	} else {
 		node.b = node.Node.Bytes()
@@ -74,14 +79,41 @@ func (node *fsNode) ReadAll(ctx context.Context) ([]byte, error) {
 	return node.b, nil
 }
 
+func (node *fsNode) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
+	m := node.Node.Map()
+	if m == nil {
+		// not a directory
+		return nil, nil, fuse.ENOENT
+	}
+
+	sub := m[req.Name]
+	if sub != nil {
+		// can't create a file twice
+		return nil, nil, fuse.EIO
+	}
+
+	// TODO: this doesn't push to Firebase until something gets written to it
+	err := node.Node.Handle(time.Now(), "/" + req.Name, "")
+	if err != nil {
+		log.Printf("couldn't create new path (path=%v): %v", req.Name, err)
+		return nil, nil, fuse.EIO
+	}
+
+	n, err := node.Lookup(ctx, req.Name)
+	return n, n, err
+}
+
 func (node *fsNode) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
-	// TODO: explicitly prevent directories
-	// allow write at zero, _or_ at end (replaces value)
+	if node.isDir() {
+		return fuse.EIO
+	}
 	if req.Offset != 0 && int(req.Offset) < len(node.b) {
+		// allow write at zero, _or_ at end (replaces value)
 		return fuse.EIO
 	}
 	if node.Node.Data == nil {
-		// TODO: new files currently unsupported
+		// for some reason this file has no data
+		log.Printf("set with nil existing data: %v", node.Node.Key)
 		return fuse.EIO
 	}
 
@@ -90,7 +122,7 @@ func (node *fsNode) Write(ctx context.Context, req *fuse.WriteRequest, resp *fus
 	// TODO: This is a synchronous write that doesn't update the local state. We probably want to
 	// optimistically set locally and send the request later (support offline), then wait until the
 	// update comes in (during the write, or immediately after it).
-	log.Printf("set: %v => %v\n", node.Node.Key, value)
+	log.Printf("set: %v => %v", node.Node.Key, value)
 	fb := node.f.f
 	if node.Node.Key != "" {
 		fb = fb.Child(node.Node.Key)
