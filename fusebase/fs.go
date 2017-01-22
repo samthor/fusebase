@@ -59,7 +59,7 @@ func (node *fsNode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	m := node.Node.Map()
 	if m == nil {
 		// not a directory
-		return []fuse.Dirent{}, nil
+		return nil, fuse.EIO
 	}
 
 	out := make([]fuse.Dirent, 0, len(m))
@@ -79,34 +79,47 @@ func (node *fsNode) ReadAll(ctx context.Context) ([]byte, error) {
 	return node.b, nil
 }
 
-func (node *fsNode) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
+func (node *fsNode) internalCreate(ctx context.Context, name string, dir bool) (fs.Node, error) {
 	m := node.Node.Map()
 	if m == nil {
 		// not a directory
-		return nil, nil, fuse.ENOENT
+		return nil, fuse.ENOENT
 	}
 
-	sub := m[req.Name]
+	sub := m[name]
 	if sub != nil {
 		// can't create a file twice
-		return nil, nil, fuse.EIO
+		return nil, fuse.EIO
+	}
+
+	var value interface{}
+	if dir {
+		value = make(map[string]interface{})
+	} else {
+		value = ""
 	}
 
 	// TODO: this doesn't push to Firebase until something gets written to it
-	err := node.Node.Handle(time.Now(), "/"+req.Name, "")
+	err := node.Node.Handle(time.Now(), "/"+name, value)
 	if err != nil {
-		log.Printf("couldn't create new path (path=%v): %v", req.Name, err)
-		return nil, nil, fuse.EIO
+		log.Printf("couldn't create new path (path=%v, dir=%v): %v", name, dir, err)
+		return nil, fuse.EIO
 	}
+	return node.Lookup(ctx, name)
+}
 
-	n, err := node.Lookup(ctx, req.Name)
+func (node *fsNode) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
+	n, err := node.internalCreate(ctx, req.Name, false)
 	return n, n, err
+}
+
+func (node *fsNode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
+	return node.internalCreate(ctx, req.Name, true)
 }
 
 func (node *fsNode) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	// TODO: same sync write as below
 	key := node.Node.Key + "/" + req.Name
-	log.Printf("remove: %v", key)
 	fb := node.f.fbFor(key)
 	if fb == nil {
 		return fuse.EIO
@@ -131,6 +144,7 @@ func (node *fsNode) Write(ctx context.Context, req *fuse.WriteRequest, resp *fus
 	}
 
 	value := bytesToValue(req.Data, node.Node.Data)
+	resp.Size = len(req.Data)
 
 	// TODO: This is a synchronous write that doesn't update the local state. We probably want to
 	// optimistically set locally and send the request later (support offline), then wait until the
@@ -140,10 +154,6 @@ func (node *fsNode) Write(ctx context.Context, req *fuse.WriteRequest, resp *fus
 	if fb == nil {
 		return fuse.EIO
 	}
-	err := fb.Set(value) // set, because this is a file node
-	if err != nil {
-		return err
-	}
-	resp.Size = len(req.Data)
-	return nil
+	return fb.Set(value) // set, because this is a file node
 }
+
