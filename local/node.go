@@ -8,12 +8,17 @@ import (
 )
 
 var (
-	globalInode = uint64(0)
+	inodeCh = make(chan uint64)
 )
 
-func nextInode() uint64 {
-	globalInode++
-	return globalInode
+func init() {
+	globalInode := uint64(0)
+	go func() {
+		for {
+			globalInode++
+			inodeCh <- globalInode
+		}
+	}()
 }
 
 // Node represents a node in Firebase.
@@ -93,7 +98,7 @@ func (n *Node) internalHandle(now time.Time, p []string, data interface{}) bool 
 		if data == nil {
 			return false // don't bother proceeding, nuking anyway
 		}
-		child = &Node{Created: now, Inode: nextInode(), Key: n.Key + "/" + key}
+		child = &Node{Created: now, Inode: <-inodeCh, Key: n.Key + "/" + key}
 		m[key] = child
 	}
 	nuked := child.internalHandle(now, p[1:], data)
@@ -129,7 +134,7 @@ func (n *Node) set(now time.Time, data interface{}) bool {
 		n.Data = local
 
 		for key, sub := range m {
-			node := &Node{Created: now, Inode: nextInode(), Key: n.Key + "/" + key}
+			node := &Node{Created: now, Inode: <-inodeCh, Key: n.Key + "/" + key}
 			if !node.set(now, sub) {
 				local[key] = node
 			}
