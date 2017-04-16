@@ -42,7 +42,7 @@ func (n *Node) Bytes() []byte {
 	case float64:
 		return strconv.AppendFloat(nil, d, 'f', -1, 64)
 	case bool:
-		// TODO: what's better than 1/0?
+		// TODO: use a special node type to indicate bool
 		if d {
 			return []byte("1")
 		}
@@ -122,6 +122,7 @@ func (n *Node) internalPrint(prefix string) {
 	}
 }
 
+// set updates the given Node with new data. Returns true if the Node should be nuked by its owner.
 func (n *Node) set(now time.Time, data interface{}) bool {
 	n.Updated = now
 	if data == nil {
@@ -142,7 +143,7 @@ func (n *Node) set(now time.Time, data interface{}) bool {
 		return len(local) == 0 // nuke if we didn't end up with any keys for some reason
 	}
 
-	// nb. should be a bool, float64 or string
+	// nb. should be a primitive type
 	n.Data = data
 	return false
 }
