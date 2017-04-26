@@ -2,6 +2,7 @@ package local
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -79,6 +80,17 @@ func (n *Node) Handle(now time.Time, path string, data interface{}) error {
 	return nil
 }
 
+// purge is called when this Node is deleted.
+func (n *Node) purge() {
+	m, ok := n.Data.(NodeMap)
+	if ok {
+		for _, node := range m {
+			node.purge()
+		}
+	}
+	log.Printf("purging node: %v", n.Key)
+}
+
 func (n *Node) internalHandle(now time.Time, p []string, data interface{}) bool {
 	if len(p) == 0 {
 		// TODO: directories can become files and vice versa
@@ -87,6 +99,7 @@ func (n *Node) internalHandle(now time.Time, p []string, data interface{}) bool 
 
 	m, ok := n.Data.(NodeMap)
 	if !ok {
+		// TODO: We're not purging here: it's the _same_ node, but it is a transition primitive => dict.
 		m = make(NodeMap) // weird, but Firebase thinks there's a map here
 		n.Data = m
 		// TODO: crash?
@@ -103,6 +116,7 @@ func (n *Node) internalHandle(now time.Time, p []string, data interface{}) bool 
 	}
 	nuked := child.internalHandle(now, p[1:], data)
 	if nuked {
+		child.purge()
 		delete(m, key)
 	}
 	return len(m) == 0 // nuke if no more children here
