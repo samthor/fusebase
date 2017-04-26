@@ -16,7 +16,7 @@ import (
 // and it's unclear where bazil.org/fuse library calls these handlers from.
 
 func (f *FUSEBase) Root() (fs.Node, error) {
-	return &fsNode{Node: &f.root, f: f}, nil
+	return f.fs, nil
 }
 
 type fsNode struct {
@@ -43,40 +43,21 @@ func (node *fsNode) Attr(ctx context.Context, a *fuse.Attr) error {
 
 func (node *fsNode) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	m := node.Node.Map()
-	if m == nil {
-		// not a directory
-		return nil, fuse.ENOENT
-	}
-
 	sub := m[name]
-	if sub == nil {
+	if m == nil || sub == nil {
+		// does not exist or not a dir
 		return nil, fuse.ENOENT
 	}
-	return &fsNode{Node: sub, f: node.f}, nil
-}
 
-func (node *fsNode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	m := node.Node.Map()
-	if m == nil {
-		// not a directory
-		return nil, fuse.EIO
-	}
+	// TODO: return the same fsNode for the same local.Node.
+	out := &fsNode{Node: sub, f: node.f}
+	wrap, ch := wrapNode(out)
+	go func() {
+		<-ch
+		log.Printf("node closed: %v", out.Node.Key)
+	}()
 
-	out := make([]fuse.Dirent, 0, len(m))
-	for k, v := range m {
-		ent := fuse.Dirent{Inode: v.Inode, Name: k}
-		if v.Map() != nil {
-			ent.Type = fuse.DT_Dir
-		} else {
-			ent.Type = fuse.DT_File
-		}
-		out = append(out, ent)
-	}
-	return out, nil
-}
-
-func (node *fsNode) ReadAll(ctx context.Context) ([]byte, error) {
-	return node.b, nil
+	return wrap, nil
 }
 
 func (node *fsNode) internalCreate(ctx context.Context, name string, dir bool) (fs.Node, error) {
@@ -99,7 +80,7 @@ func (node *fsNode) internalCreate(ctx context.Context, name string, dir bool) (
 		value = ""
 	}
 
-	// TODO: this doesn't push to Firebase until something gets written to it
+	// TODO: this doesn't push to Firebase until something gets written to it; the node is transient
 	err := node.Node.Handle(time.Now(), "/"+name, value)
 	if err != nil {
 		log.Printf("couldn't create new path (path=%v, dir=%v): %v", name, dir, err)
@@ -126,7 +107,35 @@ func (node *fsNode) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	}
 
 	// this works for directories too, so rmdir a directory removes all its children
-	return fb.Set(nil)
+	out := fb.Set(nil)
+	if out == nil {
+		// TODO: purge?
+	}
+	return out
+}
+
+func (node *fsNode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
+	m := node.Node.Map()
+	if m == nil {
+		// not a directory
+		return nil, fuse.EIO
+	}
+
+	out := make([]fuse.Dirent, 0, len(m))
+	for k, v := range m {
+		ent := fuse.Dirent{Inode: v.Inode, Name: k}
+		if v.Map() != nil {
+			ent.Type = fuse.DT_Dir
+		} else {
+			ent.Type = fuse.DT_File
+		}
+		out = append(out, ent)
+	}
+	return out, nil
+}
+
+func (node *fsNode) ReadAll(ctx context.Context) ([]byte, error) {
+	return node.b, nil
 }
 
 func (node *fsNode) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
@@ -156,4 +165,3 @@ func (node *fsNode) Write(ctx context.Context, req *fuse.WriteRequest, resp *fus
 	}
 	return fb.Set(value) // set, because this is a file node
 }
-

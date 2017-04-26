@@ -10,33 +10,33 @@ import (
 
 // FUSEBase provides a FUSE filesystem backed on Firebase.
 type FUSEBase struct {
-	f    *firego.Firebase
-	root local.Node
+	fb *firego.Firebase
+	fs *fsNode // fixed root node
 }
 
 // New creates a new FUSEBase based on the given firebase/key.
 func New(firebase, key string) (*FUSEBase, error) {
-	fb := &FUSEBase{}
-	f := firego.New("https://"+firebase+".firebaseIO.com", nil)
-	f.Auth(key)
-	fb.f = f
+	fb := firego.New("https://"+firebase+".firebaseIO.com", nil)
+	fb.Auth(key)
 
 	notifications := make(chan firego.Event)
-	if err := f.Watch(notifications); err != nil {
+	if err := fb.Watch(notifications); err != nil {
 		return nil, err
 	}
 
-	// root has empty key, not "/"
-	fb.root.Created = time.Now()
+	root := local.Node{
+		Created: time.Now(),
+		Key:     "", // intentionally empty, not "/"
+	}
 
 	go func() {
-		defer f.StopWatching()
+		defer fb.StopWatching()
 		for event := range notifications {
 			now := time.Now()
 
 			switch event.Type {
 			case "put":
-				err := fb.root.Handle(now, event.Path, event.Data)
+				err := root.Handle(now, event.Path, event.Data)
 				if err != nil {
 					log.Fatalf("couldn't handle update: %v", err)
 				}
@@ -51,11 +51,13 @@ func New(firebase, key string) (*FUSEBase, error) {
 		log.Fatalf("firebase API stopped")
 	}()
 
-	return fb, nil
+	out := &FUSEBase{fb: fb}
+	out.fs = &fsNode{Node: &root, f: out}
+	return out, nil
 }
 
 func (f *FUSEBase) fbFor(key string) *firego.Firebase {
-	fb := f.f
+	fb := f.fb
 	if key != "" {
 		fb = fb.Child(key)
 	}
