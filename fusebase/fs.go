@@ -7,6 +7,7 @@ import (
 
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"golang.org/x/net/context"
@@ -20,9 +21,10 @@ func (f *FUSEBase) Root() (fs.Node, error) {
 }
 
 type fsNode struct {
-	Node *local.Node
-	f    *FUSEBase
-	b    []byte // cache
+	Node  *local.Node
+	f     *FUSEBase
+	b     []byte // cache
+	users sync.WaitGroup
 }
 
 func (node *fsNode) isDir() bool {
@@ -34,6 +36,7 @@ func (node *fsNode) Attr(ctx context.Context, a *fuse.Attr) error {
 	if node.isDir() {
 		a.Mode = os.ModeDir | 0555
 	} else {
+		log.Printf("node loading bytes: %v", node.Node.Key)
 		node.b = node.Node.Bytes()
 		a.Size = uint64(len(node.b))
 		a.Mode = 0644
@@ -49,14 +52,26 @@ func (node *fsNode) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		return nil, fuse.ENOENT
 	}
 
-	// TODO: return the same fsNode for the same local.Node.
-	out := &fsNode{Node: sub, f: node.f}
-	wrap, ch := wrapNode(out)
-	go func() {
-		<-ch
-		log.Printf("node closed: %v", out.Node.Key)
-	}()
+	f := node.f
+	out := f.nodes[sub]
+	if out == nil {
+		out = &fsNode{Node: sub, f: f}
+		f.nodes[sub] = out
 
+		defer func() {
+			go func() {
+				out.users.Wait()
+				delete(f.nodes, sub)
+				log.Printf("local node closed: %p (%v)", out, sub.Key)
+			}()
+		}()
+	}
+	out.users.Add(1)
+	log.Printf("loaded node: %p (%v)", out, sub.Key)
+
+	wrap := wrapNode(out, func() {
+		out.users.Done()
+	})
 	return wrap, nil
 }
 

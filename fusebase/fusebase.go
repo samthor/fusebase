@@ -12,6 +12,9 @@ import (
 type FUSEBase struct {
 	fb *firego.Firebase
 	fs *fsNode // fixed root node
+
+	// TODO: nodes will become invalid when purged - then what?!
+	nodes map[*local.Node]*fsNode
 }
 
 // New creates a new FUSEBase based on the given firebase/key.
@@ -26,7 +29,7 @@ func New(firebase, key string) (*FUSEBase, error) {
 
 	root := local.Node{
 		Created: time.Now(),
-		Key:     "", // intentionally empty, not "/"
+		Key:     "", // intentionally not "/"
 	}
 
 	go func() {
@@ -51,15 +54,20 @@ func New(firebase, key string) (*FUSEBase, error) {
 		log.Fatalf("firebase API stopped")
 	}()
 
-	out := &FUSEBase{fb: fb}
+	out := &FUSEBase{
+		fb: fb,
+		nodes: make(map[*local.Node]*fsNode),
+	}
 	out.fs = &fsNode{Node: &root, f: out}
 	return out, nil
 }
 
 func (f *FUSEBase) fbFor(key string) *firego.Firebase {
-	fb := f.fb
-	if key != "" {
-		fb = fb.Child(key)
+	if len(key) == 0 {
+		return f.fb
 	}
-	return fb
+	if key[0] == '/' {
+		return f.fb.Child(key)
+	}
+	return nil
 }

@@ -2,7 +2,6 @@ package local
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -80,15 +79,20 @@ func (n *Node) Handle(now time.Time, path string, data interface{}) error {
 	return nil
 }
 
-// purge is called when this Node is deleted.
-func (n *Node) purge() {
-	m, ok := n.Data.(NodeMap)
-	if ok {
-		for _, node := range m {
-			node.purge()
+// purgeNode purges this Node and all its descendants.
+func purgeNode(n *Node) {
+	pending := []*Node{n}
+
+	for i := 0; i < len(pending); i++ {
+		next := pending[i]
+		next.Key = "-" // TODO: anything not starting with "/" is dead
+
+		if m, ok := n.Data.(NodeMap); ok {
+			for _, node := range m {
+				pending = append(pending, node)
+			}
 		}
 	}
-	log.Printf("purging node: %v", n.Key)
 }
 
 func (n *Node) internalHandle(now time.Time, p []string, data interface{}) bool {
@@ -116,8 +120,8 @@ func (n *Node) internalHandle(now time.Time, p []string, data interface{}) bool 
 	}
 	nuked := child.internalHandle(now, p[1:], data)
 	if nuked {
-		child.purge()
 		delete(m, key)
+		purgeNode(child)
 	}
 	return len(m) == 0 // nuke if no more children here
 }
