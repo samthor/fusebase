@@ -43,9 +43,9 @@ func (n *Node) Bytes() []byte {
 	return nil
 }
 
-// Show determines whether this node should be shown. Nil receiver allowed.
+// Show determines whether this node should be shown.
 func (n *Node) Show() bool {
-	return n != nil && (n.Data != nil || n.VNew)
+	return n.Data != nil || n.VNew
 }
 
 // Print renders data rooted at this Node.
