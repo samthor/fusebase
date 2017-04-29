@@ -55,7 +55,7 @@ func New(firebase, key string) (*FUSEBase, error) {
 	}()
 
 	out := &FUSEBase{
-		fb: fb,
+		fb:    fb,
 		nodes: make(map[*local.Node]*fsNode),
 	}
 	out.fs = &fsNode{Node: &root, f: out}

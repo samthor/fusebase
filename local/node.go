@@ -2,24 +2,11 @@ package local
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
 )
-
-var (
-	inodeCh = make(chan uint64)
-)
-
-func init() {
-	globalInode := uint64(0)
-	go func() {
-		for {
-			globalInode++
-			inodeCh <- globalInode
-		}
-	}()
-}
 
 // Node represents a node in Firebase.
 type Node struct {
@@ -29,6 +16,9 @@ type Node struct {
 	Key     string
 
 	Data interface{}
+
+	VNew bool // virtual new (local create)
+	VMod bool // virtual modification (local write on existing file)
 }
 
 // NodeMap is used as Data within Node when it is a map.
@@ -53,6 +43,11 @@ func (n *Node) Bytes() []byte {
 	return nil
 }
 
+// Show determines whether this node should be shown. Nil receiver allowed.
+func (n *Node) Show() bool {
+	return n != nil && (n.Data != nil || n.VNew)
+}
+
 // Print renders data rooted at this Node.
 func (n *Node) Print() {
 	n.internalPrint("")
@@ -64,6 +59,36 @@ func (n *Node) Map() NodeMap {
 		return m
 	}
 	return nil
+}
+
+// Create creates a local-only node under the given key.
+func (n *Node) Create(now time.Time, key string) (*Node, error) {
+	if !ValidKey(key) {
+		return nil, fmt.Errorf("invalid key: %v", key)
+	}
+	m, ok := n.Data.(NodeMap)
+	if !ok {
+		return nil, fmt.Errorf("can only create in dir, was: %v", n.Data)
+	} else if prev, ok := m[key]; ok {
+		return prev, nil // already exists, probably fine
+	}
+
+	child := &Node{
+		Created: now,
+		Inode:   <-inodeCh,
+		Key:     n.Key + "/" + key,
+		VNew:    true,
+	}
+	m[key] = child
+	return child, nil
+}
+
+// Lookup returns the node under this key, if any.
+func (n *Node) Lookup(key string) (*Node, bool) {
+	if m, ok := n.Data.(NodeMap); ok {
+		return m[key], true
+	}
+	return nil, false
 }
 
 // Handle sets the given path to the specified raw data.
@@ -85,7 +110,12 @@ func purgeNode(n *Node) {
 
 	for i := 0; i < len(pending); i++ {
 		next := pending[i]
-		next.Key = "-" // TODO: anything not starting with "/" is dead
+		if len(next.Key) == 0 || next.Key[0] != '/' {
+			log.Printf("can't purge node, unexpected key: %v", next.Key)
+		} else {
+			// TODO: anything not starting with "/" is dead
+			next.Key = "-" + next.Key
+		}
 
 		if m, ok := n.Data.(NodeMap); ok {
 			for _, node := range m {
@@ -93,6 +123,12 @@ func purgeNode(n *Node) {
 			}
 		}
 	}
+}
+
+func (n *Node) remoteTouch(now time.Time) {
+	n.Updated = now
+	n.VNew = false
+	n.VMod = false
 }
 
 func (n *Node) internalHandle(now time.Time, p []string, data interface{}) bool {
@@ -117,12 +153,27 @@ func (n *Node) internalHandle(now time.Time, p []string, data interface{}) bool 
 		}
 		child = &Node{Created: now, Inode: <-inodeCh, Key: n.Key + "/" + key}
 		m[key] = child
+	} else {
+		child.remoteTouch(now)
 	}
 	nuked := child.internalHandle(now, p[1:], data)
 	if nuked {
 		delete(m, key)
 		purgeNode(child)
 	}
+
+	// does this node have any real, i.e. non-VNew nodes?
+	hasReal := false
+	for _, sub := range m {
+		if !sub.VNew {
+			hasReal = true
+			break
+		}
+	}
+	if !hasReal {
+		n.VNew = true // if not, then it's basically a VNew node
+	}
+
 	return len(m) == 0 // nuke if no more children here
 }
 
@@ -142,7 +193,7 @@ func (n *Node) internalPrint(prefix string) {
 
 // set updates the given Node with new data. Returns true if the Node should be nuked by its owner.
 func (n *Node) set(now time.Time, data interface{}) bool {
-	n.Updated = now
+	n.remoteTouch(now)
 	if data == nil {
 		n.Data = nil // incase we're the root node or someone is holding onto us
 		return true
