@@ -14,7 +14,7 @@ func ValidKey(key string) bool {
 		return false
 	}
 	for _, r := range key {
-		if r < 31 || r == 127 || strings.ContainsRune(invalidChars, r) {
+		if r <= 31 || r == 127 || strings.ContainsRune(invalidChars, r) {
 			return false
 		}
 	}
